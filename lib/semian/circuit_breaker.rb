@@ -36,8 +36,6 @@ module Semian
     end
 
     def acquire(resource = nil, &block)
-      return yield if disabled?
-
       transition_to_half_open if transition_to_half_open?
 
       raise OpenCircuitError unless request_allowed?
@@ -66,7 +64,7 @@ module Semian
 
     def mark_failed(error)
       push_error(error)
-      push_time(@errors)
+      push_time
       if closed?
         transition_to_open if error_threshold_reached?
       elsif half_open?
@@ -131,19 +129,20 @@ module Semian
       last_error_time = @errors.last
       return false unless last_error_time
 
-      Time.at(last_error_time) + @error_timeout < Time.now
+      last_error_time + @error_timeout < Process.clock_gettime(Process::CLOCK_MONOTONIC)
     end
 
     def push_error(error)
       @last_error = error
     end
 
-    def push_time(window, time: Time.now)
+    def push_time
+      time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       if error_threshold_timeout_enabled
-        window.reject! { |err_time| err_time + @error_threshold_timeout < time.to_i }
+        @errors.reject! { |err_time| err_time + @error_threshold_timeout < time }
       end
 
-      window << time.to_i
+      @errors << time
     end
 
     def log_state_transition(new_state)
@@ -151,7 +150,8 @@ module Semian
 
       str = "[#{self.class.name}] State transition from #{@state.value} to #{new_state}."
       str += " success_count=#{@successes.value} error_count=#{@errors.size}"
-      str += " success_count_threshold=#{@success_count_threshold} error_count_threshold=#{@error_count_threshold}"
+      str += " success_count_threshold=#{@success_count_threshold}"
+      str += " error_count_threshold=#{@error_count_threshold}"
       str += " error_timeout=#{@error_timeout} error_last_at=\"#{@errors.last}\""
       str += " name=\"#{@name}\""
       if new_state == :open && @last_error
@@ -165,21 +165,14 @@ module Semian
       Semian.notify(:state_change, self, nil, nil, state: new_state)
     end
 
-    def disabled?
-      ENV["SEMIAN_CIRCUIT_BREAKER_DISABLED"] || ENV["SEMIAN_DISABLED"]
-    end
-
     def maybe_with_half_open_resource_timeout(resource, &block)
-      result =
-        if half_open? && @half_open_resource_timeout && resource.respond_to?(:with_resource_timeout)
-          resource.with_resource_timeout(@half_open_resource_timeout) do
-            block.call
-          end
-        else
+      if half_open? && @half_open_resource_timeout && resource.respond_to?(:with_resource_timeout)
+        resource.with_resource_timeout(@half_open_resource_timeout) do
           block.call
         end
-
-      result
+      else
+        block.call
+      end
     end
   end
 end

@@ -15,7 +15,7 @@ jobs:
     name: Update gems for all Gemfiles
     runs-on: ubuntu-latest
     container:
-      image: ruby:3.1
+      image: ruby:3.2
     steps:
       -
         name: Checkout
@@ -44,10 +44,13 @@ jobs:
       -
         name: Create Pull Request
         id: cpr
-        uses: peter-evans/create-pull-request@v4
+        uses: peter-evans/create-pull-request@v5
         with:
           title: Bump gems
           labels: ruby,dependencies
+          branch: bump_dependencies
+          body: |
+            Update gems versions in Gemfiles to latest one.
           add-paths: |
             Gemfile.lock
             gemfiles/*.lock

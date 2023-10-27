@@ -47,6 +47,7 @@ class TestGRPC < Minitest::Test
     error = assert_raises(::GRPC::Unavailable) do
       @stub.an_rpc(EchoMsg.new)
     end
+
     assert_equal(@host, error.semian_identifier)
   end
 
@@ -69,6 +70,7 @@ class TestGRPC < Minitest::Test
 
   def test_unavailable_server_opens_the_circuit
     GRPC::ActiveCall.any_instance.stubs(:request_response).raises(::GRPC::Unavailable)
+
     ERROR_THRESHOLD.times do
       assert_raises(::GRPC::Unavailable) do
         @stub.an_rpc(EchoMsg.new)
@@ -81,8 +83,11 @@ class TestGRPC < Minitest::Test
 
   def test_timeout_opens_the_circuit
     skip if ENV["SKIP_FLAKY_TESTS"]
-    stub = build_insecure_stub(EchoStub,
-      host: "#{SemianConfig["toxiproxy_upstream_host"]}:#{SemianConfig["grpc_toxiproxy_port"]}", opts: { timeout: 0.1 })
+    stub = build_insecure_stub(
+      EchoStub,
+      host: "#{SemianConfig["toxiproxy_upstream_host"]}:#{SemianConfig["grpc_toxiproxy_port"]}",
+      opts: { timeout: 0.1 },
+    )
     run_services_on_server(@server, services: [EchoService]) do
       Toxiproxy["semian_test_grpc"].downstream(:latency, latency: 1000).apply do
         ERROR_THRESHOLD.times do
@@ -106,6 +111,7 @@ class TestGRPC < Minitest::Test
       next if event != :success
 
       notified = true
+
       assert_equal(Semian[@host], resource)
       assert_equal(:request_response, scope)
       assert_equal(:grpc, adapter)
@@ -199,6 +205,7 @@ class TestGRPC < Minitest::Test
       stub1 = build_insecure_stub(EchoStub)
       stub1.semian_resource.acquire do
         stub2 = build_insecure_stub(EchoStub, host: "0.0.0.1")
+
         stub2.semian_resource.acquire do
           assert_raises(GRPC::ResourceBusyError) do
             stub2.an_rpc(EchoMsg.new)

@@ -5,6 +5,8 @@ require "mysql2"
 require "semian/mysql2"
 
 class TestMysql2 < Minitest::Test
+  include BackgroundHelper
+
   ERROR_TIMEOUT = 5
   ERROR_THRESHOLD = 1
   SEMIAN_OPTIONS = {
@@ -17,6 +19,7 @@ class TestMysql2 < Minitest::Test
   }
 
   def setup
+    super
     @proxy = Toxiproxy[:semian_test_mysql]
     Semian.destroy(:mysql_testing)
   end
@@ -54,6 +57,7 @@ class TestMysql2 < Minitest::Test
 
   def test_query_errors_does_not_open_the_circuit
     client = connect_to_mysql!
+
     (ERROR_THRESHOLD * 2).times do
       assert_raises(::Mysql2::Error) do
         client.query("ERROR!")
@@ -80,7 +84,7 @@ class TestMysql2 < Minitest::Test
     # After Mysql2::CircuitOpenError check regular queries are working fine.
     query_string = "1 + 1"
     result = nil
-    Timecop.travel(ERROR_TIMEOUT + 1) do
+    time_travel(ERROR_TIMEOUT + 1) do
       result = client.query("SELECT #{query_string};")
     end
 
@@ -93,6 +97,7 @@ class TestMysql2 < Minitest::Test
       next unless event == :success
 
       notified = true
+
       assert_equal(Semian[:mysql_testing], resource)
       assert_equal(:connection, scope)
       assert_equal(:mysql, adapter)
@@ -112,6 +117,7 @@ class TestMysql2 < Minitest::Test
       error = assert_raises(Mysql2::ResourceBusyError) do
         connect_to_mysql!
       end
+
       assert_equal(:mysql_testing, error.semian_identifier)
     end
   end
@@ -122,6 +128,7 @@ class TestMysql2 < Minitest::Test
       error = assert_raises(::Mysql2::Error) do
         client.query("SELECT 1 + 1;")
       end
+
       assert_equal(client.semian_identifier, error.semian_identifier)
     end
   end
@@ -132,6 +139,7 @@ class TestMysql2 < Minitest::Test
     error = assert_raises(Mysql2::Error) do
       client.query("SYNTAX ERROR!")
     end
+
     assert_nil(error.semian_identifier)
   end
 
@@ -162,7 +170,7 @@ class TestMysql2 < Minitest::Test
       connect_to_mysql!
     end
 
-    Timecop.travel(ERROR_TIMEOUT + 1) do
+    time_travel(ERROR_TIMEOUT + 1) do
       connect_to_mysql!
     end
   end
@@ -173,6 +181,7 @@ class TestMysql2 < Minitest::Test
     notified = false
     subscriber = Semian.subscribe do |event, resource, scope, adapter|
       notified = true
+
       assert_equal(:success, event)
       assert_equal(Semian[:mysql_testing], resource)
       assert_equal(:query, scope)
@@ -229,6 +238,7 @@ class TestMysql2 < Minitest::Test
   def test_query_whitelisted_returns_false_for_binary_sql
     binary_query = File.read(File.expand_path("../../fixtures/binary.sql", __FILE__))
     client = connect_to_mysql!
+
     refute(client.send(:query_whitelisted?, binary_query))
   end
 
@@ -291,7 +301,7 @@ class TestMysql2 < Minitest::Test
       client.query("SELECT 1 + 1;")
     end
 
-    Timecop.travel(ERROR_TIMEOUT + 1) do
+    time_travel(ERROR_TIMEOUT + 1) do
       assert_equal(2, client.query("SELECT 1 + 1 as sum;").to_a.first["sum"])
     end
   end
@@ -349,7 +359,7 @@ class TestMysql2 < Minitest::Test
       client.query("SELECT 1 + 1;")
     end
 
-    Timecop.travel(ERROR_TIMEOUT + 1) do
+    time_travel(ERROR_TIMEOUT + 1) do
       @proxy.downstream(:latency, latency: 1500).apply do
         assert_raises(Mysql2::Error) do
           client.query("SELECT 1 + 1;")
@@ -357,7 +367,7 @@ class TestMysql2 < Minitest::Test
       end
     end
 
-    Timecop.travel(ERROR_TIMEOUT * 2 + 1) do
+    time_travel(ERROR_TIMEOUT * 2 + 1) do
       client.query("SELECT 1 + 1;")
       client.query("SELECT 1 + 1;")
 
@@ -379,6 +389,7 @@ class TestMysql2 < Minitest::Test
         assert_raises(Mysql2::Error) do
           connect_to_mysql!
         end
+
         assert_equal(mysql_connection_error, Semian[:mysql_testing].circuit_breaker.last_error.class)
       end
     end

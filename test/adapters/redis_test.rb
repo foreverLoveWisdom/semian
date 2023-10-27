@@ -8,6 +8,8 @@ require "benchmark"
 require "semian/redis"
 
 module RedisTests
+  include BackgroundHelper
+
   REDIS_TIMEOUT = 0.5
   ERROR_TIMEOUT = 5
   ERROR_THRESHOLD = 1
@@ -21,34 +23,40 @@ module RedisTests
     error_timeout: ERROR_TIMEOUT,
   }
 
-  attr_writer :threads
-
   def setup
+    super
     @proxy = Toxiproxy[:semian_test_redis]
     Semian.destroy(:redis_testing)
   end
 
   def test_semian_identifier
     assert_equal(:redis_foo, new_redis(semian: { name: "foo" })._client.semian_identifier)
-    assert_equal(:"redis_#{SemianConfig["toxiproxy_upstream_host"]}:16379/1",
-      new_redis(semian: { name: nil })._client.semian_identifier)
-    assert_equal(:"redis_example.com:42/1",
-      new_redis(host: "example.com", port: 42, semian: { name: nil })._client.semian_identifier)
+    assert_equal(
+      :"redis_#{SemianConfig["toxiproxy_upstream_host"]}:16379/1",
+      new_redis(semian: { name: nil })._client.semian_identifier,
+    )
+    assert_equal(
+      :"redis_example.com:42/1",
+      new_redis(host: "example.com", port: 42, semian: { name: nil })._client.semian_identifier,
+    )
   end
 
   def test_client_alias
     redis = connect_to_redis!
+
     assert_equal(redis._client.semian_resource, redis.semian_resource)
     assert_equal(redis._client.semian_identifier, redis.semian_identifier)
   end
 
   def test_semian_can_be_disabled
     resource = Redis.new(semian: false)._client.semian_resource
+
     assert_instance_of(Semian::UnprotectedResource, resource)
   end
 
   def test_semian_resource_in_pipeline
     redis = connect_to_redis!
+
     redis.pipelined do |_pipeline|
       assert_instance_of(Semian::ProtectedResource, redis.semian_resource)
     end
@@ -89,6 +97,7 @@ module RedisTests
   def test_command_errors_does_not_open_the_circuit
     client = connect_to_redis!
     client.hset("my_hash", "foo", "bar")
+
     (ERROR_THRESHOLD * 2).times do
       assert_raises(Redis::CommandError) do
         client.get("my_hash")
@@ -139,6 +148,7 @@ module RedisTests
       next if scope == :query
 
       notified = true
+
       assert_equal(Semian[:redis_testing], resource)
       assert_equal(:connection, scope)
       if ::Redis::VERSION >= "5"
@@ -162,6 +172,7 @@ module RedisTests
       error = assert_raises(Redis::ResourceBusyError) do
         connect_to_redis!
       end
+
       assert_equal(:redis_testing, error.semian_identifier)
     end
   end
@@ -171,6 +182,7 @@ module RedisTests
       error = assert_raises(::Redis::BaseConnectionError) do
         connect_to_redis!
       end
+
       assert_equal(:redis_testing, error.semian_identifier)
     end
   end
@@ -181,12 +193,17 @@ module RedisTests
     error = assert_raises(::Redis::CommandError) do
       client.hget("foo", "bar")
     end
+
     refute_respond_to(error, :semian_identifier)
   end
 
   def test_resource_timeout_on_connect
     @proxy.downstream(:latency, latency: redis_timeout_ms).apply do
-      background { connect_to_redis! }
+      background do
+        connect_to_redis!
+      rescue Redis::CircuitOpenError
+        nil
+      end
 
       assert_raises(Redis::ResourceBusyError) do
         connect_to_redis!
@@ -205,7 +222,7 @@ module RedisTests
       connect_to_redis!(host: "thisdoesnotresolve")
     end
 
-    Timecop.travel(ERROR_TIMEOUT + 1) do
+    time_travel(ERROR_TIMEOUT + 1) do
       connect_to_redis!
     end
   end
@@ -248,7 +265,7 @@ module RedisTests
       connect_to_redis!
     end
 
-    Timecop.travel(ERROR_TIMEOUT + 1) do
+    time_travel(ERROR_TIMEOUT + 1) do
       connect_to_redis!
     end
   end
@@ -259,6 +276,7 @@ module RedisTests
     notified = false
     subscriber = Semian.subscribe do |event, resource, scope, adapter|
       notified = true
+
       assert_equal(:success, event)
       assert_equal(Semian[:redis_testing], resource)
       assert_equal(:query, scope)
@@ -280,7 +298,7 @@ module RedisTests
     half_open_resource_timeout = 0.1
     client = connect_to_redis!(semian: { half_open_resource_timeout: half_open_resource_timeout })
 
-    Timecop.freeze(0) do
+    time_travel(0) do
       @proxy.downstream(:latency, latency: redis_timeout_ms + 200).apply do
         ERROR_THRESHOLD.times do
           assert_raises(::Redis::TimeoutError) do
@@ -295,20 +313,20 @@ module RedisTests
     end
 
     time_circuit_half_open = ERROR_TIMEOUT + 1
-    Timecop.travel(time_circuit_half_open) do
-      assert_redis_timeout_in_delta(expected_timeout: half_open_resource_timeout) do
+    assert_redis_timeout_in_delta(expected_timeout: half_open_resource_timeout) do
+      time_travel(time_circuit_half_open) do
         client.get("foo")
       end
     end
 
     time_circuit_closed = time_circuit_half_open + ERROR_TIMEOUT + 1
-    Timecop.travel(time_circuit_closed) do
+    time_travel(time_circuit_closed) do
       SUCCESS_THRESHOLD.times { client.get("foo") }
+    end
 
-      # Timeout has reset now that the Circuit is closed
-      assert_redis_timeout_in_delta(expected_timeout: REDIS_TIMEOUT) do
-        client.get("foo")
-      end
+    # Timeout has reset now that the Circuit is closed
+    assert_redis_timeout_in_delta(expected_timeout: REDIS_TIMEOUT) do
+      client.get("foo")
     end
 
     assert_default_timeouts(client)
@@ -318,7 +336,7 @@ module RedisTests
     half_open_resource_timeout = 0.1
     client = connect_to_redis!(semian: { half_open_resource_timeout: half_open_resource_timeout })
 
-    Timecop.freeze(0) do
+    time_travel(0) do
       @proxy.downstream(:latency, latency: redis_timeout_ms + 200).apply do
         ERROR_THRESHOLD.times do
           assert_raises(::Redis::TimeoutError) do
@@ -335,8 +353,8 @@ module RedisTests
     client.close
 
     time_circuit_half_open = ERROR_TIMEOUT + 1
-    Timecop.travel(time_circuit_half_open) do
-      assert_redis_timeout_in_delta(expected_timeout: half_open_resource_timeout) do
+    assert_redis_timeout_in_delta(expected_timeout: half_open_resource_timeout) do
+      time_travel(time_circuit_half_open) do
         client.set("foo", 1)
       end
     end
@@ -344,12 +362,12 @@ module RedisTests
     client.close
 
     time_circuit_closed = time_circuit_half_open + ERROR_TIMEOUT + 1
-    Timecop.travel(time_circuit_closed) do
+    time_travel(time_circuit_closed) do
       SUCCESS_THRESHOLD.times { client.set("foo", 1) }
+    end
 
-      assert_redis_timeout_in_delta(expected_timeout: REDIS_TIMEOUT) do
-        client.set("foo", 1)
-      end
+    assert_redis_timeout_in_delta(expected_timeout: REDIS_TIMEOUT) do
+      client.set("foo", 1)
     end
 
     assert_default_timeouts(client)
@@ -358,7 +376,7 @@ module RedisTests
   def test_timeout_doesnt_change_when_half_open_but_not_configured
     client = connect_to_redis!
 
-    Timecop.freeze(0) do
+    time_travel(0) do
       @proxy.downstream(:latency, latency: redis_timeout_ms + 200).apply do
         ERROR_THRESHOLD.times do
           assert_raises(::Redis::TimeoutError) do
@@ -373,8 +391,8 @@ module RedisTests
     end
 
     time_circuit_half_open = ERROR_TIMEOUT + 1
-    Timecop.travel(time_circuit_half_open) do
-      assert_redis_timeout_in_delta(expected_timeout: REDIS_TIMEOUT) do
+    assert_redis_timeout_in_delta(expected_timeout: REDIS_TIMEOUT) do
+      time_travel(time_circuit_half_open) do
         client.get("foo")
       end
     end
@@ -425,8 +443,26 @@ module RedisTests
       client.get("foo")
     end
 
-    Timecop.travel(ERROR_TIMEOUT + 1) do
+    time_travel(ERROR_TIMEOUT + 1) do
       assert_equal("2", client.get("foo"))
+    end
+  end
+
+  def test_readonly_errors_does_not_open_the_circuit
+    client = connect_to_redis!
+
+    with_readonly_mode(client) do
+      ERROR_THRESHOLD.times do
+        assert_raises(::Redis::ReadOnlyError, ::Redis::CommandError) do
+          client.set("foo", "bar")
+        end
+      end
+
+      error = assert_raises(::Redis::ReadOnlyError, ::Redis::CommandError) do
+        client.set("foo", "bar")
+      end
+
+      assert_match("READONLY You can't write against a read only replica.", error.message)
     end
   end
 
@@ -471,6 +507,13 @@ module RedisTests
     end
   end
 
+  def with_readonly_mode(client)
+    client.replicaof("localhost", "6379")
+    yield
+  ensure
+    client.replicaof("NO", "ONE")
+  end
+
   def redis_timeout_ms
     @redis_timeout_ms ||= (REDIS_TIMEOUT * 1000).to_i
   end
@@ -483,6 +526,7 @@ module RedisTests
         @proxy.downstream(:latency, latency: latency).apply(&block)
       end
     end
+
     assert_in_delta(bench.real, expected_timeout, delta)
   end
 

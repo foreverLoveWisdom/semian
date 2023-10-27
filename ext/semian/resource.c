@@ -359,13 +359,7 @@ ms_to_timespec(long ms, struct timespec *ts)
   ts->tv_nsec = (ms % 1000) * 1000000;
 }
 
-static inline void
-semian_resource_mark(void *ptr)
-{
-  /* noop */
-}
-
-static inline void
+static void
 semian_resource_free(void *ptr)
 {
   semian_resource_t *res = (semian_resource_t *) ptr;
@@ -376,7 +370,7 @@ semian_resource_free(void *ptr)
   xfree(res);
 }
 
-static inline size_t
+static size_t
 semian_resource_memsize(const void *ptr)
 {
   return sizeof(semian_resource_t);
@@ -386,9 +380,9 @@ static const rb_data_type_t
 semian_resource_type = {
   "semian_resource",
   {
-    semian_resource_mark,
+    NULL,
     semian_resource_free,
     semian_resource_memsize
   },
-  NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+  NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY | RUBY_TYPED_WB_PROTECTED
 };

@@ -6,17 +6,17 @@ require "bundler/setup"
 require "minitest/autorun"
 require "semian"
 require "toxiproxy"
-require "timecop"
 require "tempfile"
 require "fileutils"
 require "mocha"
 require "mocha/minitest"
 
+require "helpers/adapter_helper"
 require "helpers/background_helper"
 require "helpers/circuit_breaker_helper"
-require "helpers/resource_helper"
-require "helpers/adapter_helper"
 require "helpers/mock_server.rb"
+require "helpers/resource_helper"
+require "helpers/time_helper.rb"
 
 require "config/semian_config"
 
@@ -52,6 +52,8 @@ Toxiproxy.populate([
   },
 ])
 
+Toxiproxy.reset
+
 servers = []
 servers << MockServer.start(hostname: BIND_ADDRESS, port: SemianConfig["http_port_service_a"])
 servers << MockServer.start(hostname: BIND_ADDRESS, port: SemianConfig["http_port_service_b"])
@@ -60,15 +62,9 @@ Minitest.after_run do
   servers.each(&:stop)
 end
 
-module CleanupHelper
-  def setup
-    Semian.destroy_all_resources
-  end
-end
-
 module Minitest
   class Test
-    include CleanupHelper
-    include BackgroundHelper
+    include TimeHelper
+    include ResourceHelper
   end
 end

@@ -4,7 +4,7 @@ require "test_helper"
 
 class TestInstrumentation < Minitest::Test
   def setup
-    Semian.destroy(:testing) if Semian[:testing]
+    destroy_all_semian_resources
     Semian.register(:testing, tickets: 1, error_threshold: 1, error_timeout: 5, success_threshold: 1)
   end
 
@@ -51,9 +51,11 @@ class TestInstrumentation < Minitest::Test
     hit = false
     subscription = Semian.subscribe do |*_, wait_time|
       hit = true
+
       assert(wait_time.is_a?(Integer))
     end
     Semian[:testing].acquire {}
+
     assert(hit)
   ensure
     Semian.unsubscribe(subscription)
@@ -75,6 +77,7 @@ class TestInstrumentation < Minitest::Test
       events << event
     end
     yield
+
     assert_equal(expected_events, events, "The timeline of events was not as expected")
   ensure
     Semian.unsubscribe(subscription)

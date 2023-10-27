@@ -3,19 +3,15 @@
 require "test_helper"
 
 class TestResource < Minitest::Test
-  include ResourceHelper
-
   # Time epsilon to account for super fast machines
   EPSILON = 0.1
 
   def setup
-    Semian.destroy(:testing)
-  rescue
-    nil
+    destroy_all_semian_resources
   end
 
   def teardown
-    destroy_resources
+    destroy_all_semian_resources
     signal_workers("KILL")
     Process.waitall
   end
@@ -39,6 +35,7 @@ class TestResource < Minitest::Test
     expected_warning = /semian ticket value 1\.000000 is a float, converting to fixnum/
     with_fake_std_error(warn_message: expected_warning) do
       resource = create_resource(:testing, tickets: 1.0)
+
       assert(resource)
       assert_equal(1, resource.tickets)
     end
@@ -58,12 +55,15 @@ class TestResource < Minitest::Test
 
   def test_unregister_past_0
     workers = 10
-    resource = Semian.register(:testing, tickets: workers * 2, error_threshold: 0, error_timeout: 0,
-      success_threshold: 0)
+    resource = Semian.register(
+      :testing,
+      tickets: workers * 2,
+      error_threshold: 0,
+      error_timeout: 0,
+      success_threshold: 0,
+    )
 
-    fork_workers(count: workers, tickets: 0, timeout: 0.5, wait_for_timeout: true) do
-      Semian.unregister(:testing)
-    end
+    fork_workers(count: workers, tickets: 0, timeout: 0.5, wait_for_timeout: true)
 
     Semian.unregister(:testing)
     signal_workers("TERM")
@@ -80,10 +80,12 @@ class TestResource < Minitest::Test
 
     assert_equal(workers, resource.registered_workers)
     resource.bulkhead.reset_registered_workers!
+
     assert_equal(0, resource.registered_workers)
 
     signal_workers("TERM")
     Process.waitall
+
     assert_equal(0, resource.registered_workers)
   end
 
@@ -134,12 +136,14 @@ class TestResource < Minitest::Test
     acquired = false
     resource = create_resource(:testing, tickets: 1)
     resource.acquire { acquired = true }
+
     assert(acquired)
   end
 
   def test_acquire_return_val
     resource = create_resource(:testing, tickets: 1)
     val = resource.acquire { 1234 }
+
     assert_equal(1234, val)
   end
 
@@ -147,6 +151,7 @@ class TestResource < Minitest::Test
     fork_workers(count: 2, tickets: 1, timeout: 1, wait_for_timeout: true)
     signal_workers("TERM")
     timeouts = count_worker_timeouts
+
     assert_equal(1, timeouts)
   end
 
@@ -162,6 +167,7 @@ class TestResource < Minitest::Test
     signal_workers("TERM")
 
     timeouts = count_worker_timeouts
+
     assert_equal(0, timeouts)
   end
 
@@ -205,6 +211,7 @@ class TestResource < Minitest::Test
 
     # Ensure the correct number of processes timed out
     timeouts = count_worker_timeouts
+
     assert_equal(workers - ((1 - quota) * workers).ceil, timeouts)
 
     # Ensure that the tickets were released
@@ -258,10 +265,12 @@ class TestResource < Minitest::Test
 
     # Spawn some workers to get a basis for the quota
     fork_workers(count: workers - 1, quota: quota, wait_for_timeout: true)
+
     assert_equal((workers * quota).ceil, resource.tickets)
 
     # Add more workers to ensure the number of tickets increases
     fork_workers(count: workers - 1, quota: quota, wait_for_timeout: true)
+
     assert_equal((2 * workers * quota).ceil, resource.tickets)
   end
 
@@ -273,6 +282,7 @@ class TestResource < Minitest::Test
 
     # Spawn some workers to get a basis for the quota
     fork_workers(count: workers - 1, quota: quota, wait_for_timeout: true)
+
     assert_equal((workers * quota).ceil, resource.tickets)
 
     # Signal and wait for the workers to quit
@@ -283,6 +293,7 @@ class TestResource < Minitest::Test
     assert_equal((workers * quota).ceil, resource.tickets)
 
     resource = create_resource(:testing, quota: quota, timeout: 0.1)
+
     assert_equal(1, resource.tickets)
   end
 
@@ -307,6 +318,7 @@ class TestResource < Minitest::Test
     # Create a quota based worker, and ensure it accounts for the static
     # workers that haven't shut down yet
     resource = create_resource(:testing, quota: quota, timeout: 0.1)
+
     assert_equal((quota * workers).ceil, resource.tickets)
 
     # Let the static workers shut down
@@ -315,6 +327,7 @@ class TestResource < Minitest::Test
     # Create a new resource, and ensure the static workers are no longer
     # accounted for
     resource = create_resource(:testing, quota: quota, timeout: 0.1)
+
     assert_equal((quota * 2).ceil, resource.tickets)
   end
 
@@ -341,6 +354,7 @@ class TestResource < Minitest::Test
 
     Process.kill("KILL", pid)
     resource.acquire { acquired = true }
+
     assert(acquired)
 
     Process.wait
@@ -352,11 +366,13 @@ class TestResource < Minitest::Test
     workers = rand(5..20)
     fork_workers(count: workers - 1, tickets: 1, timeout: 0.1, wait_for_timeout: true)
     resource = create_resource(:testing, tickets: 1)
+
     assert_equal(workers, resource.registered_workers)
   end
 
   def test_get_resource_key
     resource = create_resource(:testing, tickets: 2)
+
     assert_equal("0x874714f2", resource.key)
   end
 
@@ -366,6 +382,7 @@ class TestResource < Minitest::Test
 
     resource.acquire do
       acquired = true
+
       assert_equal(1, resource.count)
       assert_equal(2, resource.tickets)
     end
@@ -390,9 +407,11 @@ class TestResource < Minitest::Test
   def test_destroy
     resource = create_resource(:testing, tickets: 1)
     resource.destroy
-    assert_raises(Semian::SyscallError) do
+    exception = assert_raises(Semian::SyscallError) do
       resource.acquire {}
     end
+
+    assert_equal("semop() failed, errno: 22 (Invalid argument)", exception.message)
   end
 
   def test_destroy_already_destroyed
@@ -403,21 +422,29 @@ class TestResource < Minitest::Test
   end
 
   def test_permissions
-    resource = create_resource(:testing, permissions: 0600, tickets: 1)
+    resource = create_resource(:test_permissions, permissions: 0600, tickets: 42)
     semid = resource.semid
+    found = false
     %x(ipcs -s).lines.each do |line|
       if /\s#{semid}\s/.match(line)
         assert_equal("600", line.split[3])
+        found = true
       end
     end
 
-    resource = create_resource(:testing, permissions: 0660, tickets: 1)
+    assert(found, "Missing semaphor with semid #{semid}")
+
+    resource = create_resource(:test_permissions, permissions: 0660, tickets: 1)
     semid = resource.semid
+    found = false
     %x(ipcs -s).lines.each do |line|
       if /\s#{semid}\s/.match(line)
         assert_equal("660", line.split[3])
+        found = true
       end
     end
+
+    assert(found, "Missing semaphor with semid #{semid}")
   end
 
   def test_namespace
@@ -428,12 +455,14 @@ class TestResource < Minitest::Test
     Semian.destroy(:testing)
 
     resource = create_resource(:testing, permissions: 0600, tickets: 1)
+
     assert_equal(key, resource.key)
     Semian.destroy(:testing)
 
     Semian.namespace = "testing"
 
     resource = create_resource(:testing, permissions: 0600, tickets: 1)
+
     refute_equal(key, resource.key)
     Semian.destroy(:testing)
   ensure
@@ -491,7 +520,7 @@ class TestResource < Minitest::Test
     # This is sort of racey, because it's waiting on enough workers to quit
     # So that it has room to adjust the ticket count to the desired value.
     # This must happen in less than 5 seconds, or an internal timeout occurs.
-    resource = create_resource(:testing, tickets: (tickets / 2).floor)
+    resource = create_resource(:test_resize_tickets_decrease_with_fork, tickets: (tickets / 2).floor)
 
     # Immediately on the above call returning, the tickets should be correct
     assert_equal((tickets / 2).floor, resource.tickets)
@@ -505,6 +534,7 @@ class TestResource < Minitest::Test
     tickets = 5
 
     fork_workers(resource: :testing, count: count, tickets: tickets, wait_for_timeout: true)
+
     assert_equal(5, create_resource(:testing, tickets: 0).tickets)
     assert_equal(0, create_resource(:testing, tickets: 0).count)
 

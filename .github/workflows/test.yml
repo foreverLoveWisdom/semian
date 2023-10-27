@@ -32,6 +32,7 @@ jobs:
       fail-fast: true
       matrix:
         ruby:
+          - "3.2"
           - "3.1"
           - "3.0"
           - "2.7"
@@ -82,6 +83,8 @@ jobs:
           (echo "===== Retry Attempt: 3 ====" && bundle exec rake test:semian)
       -
         name: Examples
+        env:
+          MYSQL_HOST: mysql
         run: |
           bundle exec rake examples
 
@@ -106,6 +109,7 @@ jobs:
       fail-fast: false
       matrix:
         ruby:
+          - "3.2"
           - "3.1"
           - "3.0"
           - "2.7"
@@ -113,10 +117,12 @@ jobs:
           - grpc
           - mysql2
           - net_http
-          - rails
+          - rails_mysql2
+          - rails_trilogy
           - redis_4
           - redis_5
           - redis_client
+          - activerecord_trilogy_adapter
         include:
           - gemfile: grpc
             adapter: grpc
@@ -124,14 +130,18 @@ jobs:
             adapter: mysql2
           - gemfile: net_http
             adapter: net_http
-          - gemfile: rails
-            adapter: rails
+          - gemfile: rails_mysql2
+            adapter: rails_mysql2
+          - gemfile: rails_trilogy
+            adapter: rails_trilogy
           - gemfile: redis_4
             adapter: redis
           - gemfile: redis_5
             adapter: redis
           - gemfile: redis_client
             adapter: redis_client
+          - gemfile: activerecord_trilogy_adapter
+            adapter: activerecord_trilogy_adapter
     services:
       mysql:
         image: mysql:5.7
@@ -170,11 +180,8 @@ jobs:
           bundle install
       -
         name: Build C extension
-        env:
-          BUNDLE_GEMFILE: Gemfile
         run: |
           bundle config path vendor/bundle
-          bundle install --without test,lint
           bundle exec rake build
       -
         name: Tests

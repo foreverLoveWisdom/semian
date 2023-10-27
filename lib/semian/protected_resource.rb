@@ -5,8 +5,14 @@ module Semian
     extend Forwardable
 
     def_delegators :@bulkhead, :destroy, :count, :semid, :tickets, :registered_workers
-    def_delegators :@circuit_breaker, :reset, :mark_failed, :mark_success, :request_allowed?,
-      :open?, :closed?, :half_open?
+    def_delegators :@circuit_breaker,
+      :reset,
+      :mark_failed,
+      :mark_success,
+      :request_allowed?,
+      :open?,
+      :closed?,
+      :half_open?
 
     attr_reader :bulkhead, :circuit_breaker, :name
     attr_accessor :updated_at
@@ -15,7 +21,7 @@ module Semian
       @name = name
       @bulkhead = bulkhead
       @circuit_breaker = circuit_breaker
-      @updated_at = Time.now
+      @updated_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     end
 
     def destroy

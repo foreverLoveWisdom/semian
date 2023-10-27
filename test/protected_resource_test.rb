@@ -9,14 +9,7 @@ class TestProtectedResource < Minitest::Test
   include BackgroundHelper
 
   def setup
-    Semian.destroy(:testing)
-  rescue
-    nil
-  end
-
-  def teardown
-    destroy_resources
-    super
+    destroy_all_semian_resources
   end
 
   def test_acquire_without_bulkhead
@@ -34,6 +27,7 @@ class TestProtectedResource < Minitest::Test
         block_called = false
         @resource = Semian[:testing]
         @resource.acquire { block_called = true }
+
         assert(block_called)
         assert_instance_of(Semian::CircuitBreaker, @resource.circuit_breaker)
         assert_nil(@resource.bulkhead)
@@ -54,6 +48,7 @@ class TestProtectedResource < Minitest::Test
     @resource = Semian[:testing]
     @resource.acquire do
       acquired = true
+
       assert_equal(1, @resource.count)
       assert_equal(2, @resource.tickets)
     end
@@ -77,9 +72,11 @@ class TestProtectedResource < Minitest::Test
     @resource = Semian[:testing]
     @resource.acquire do
       acquired = true
+
       assert_equal(1, @resource.count)
       assert_equal(2, @resource.tickets)
       half_open_cicuit!(@resource)
+
       assert_circuit_closed(@resource)
     end
 

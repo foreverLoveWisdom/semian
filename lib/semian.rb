@@ -104,7 +104,7 @@ module Semian
   attr_accessor :maximum_lru_size, :minimum_lru_time, :default_permissions, :namespace
 
   self.maximum_lru_size = 500
-  self.minimum_lru_time = 300
+  self.minimum_lru_time = 300 # 300 seconds / 5 minutes
   self.default_permissions = 0660
 
   def issue_disabled_semaphores_warning
@@ -122,11 +122,16 @@ module Semian
     attr_accessor :semian_identifier
 
     def to_s
+      message = super
       if @semian_identifier
-        "[#{@semian_identifier}] #{super}"
-      else
-        super
+        prefix = "[#{@semian_identifier}] "
+        # When an error is created from another error's message it might
+        # already have a semian identifier in their message
+        unless message.start_with?(prefix)
+          message = "#{prefix}#{message}"
+        end
       end
+      message
     end
   end
 
@@ -156,11 +161,17 @@ module Semian
   #
   # +timeout+: Default timeout in seconds. Default 0. (bulkhead)
   #
+  # +error_timeout+: The duration in seconds since the last error after which the error count is reset to 0.
+  # (circuit breaker required)
+  #
   # +error_threshold+: The amount of errors that must happen within error_timeout amount of time to open
   # the circuit. (circuit breaker required)
   #
-  # +error_timeout+: The duration in seconds since the last error after which the error count is reset to 0.
-  # (circuit breaker required)
+  # +error_threshold_timeout+: The duration in seconds to examine number of errors to compare with error_threshold.
+  # Default same as error_timeout. (circuit breaker)
+  #
+  # +error_threshold_timeout_enabled+: flag to enable/disable filter time window based error eviction
+  # (error_threshold_timeout). Default true. (circuit breaker)
   #
   # +success_threshold+: The number of consecutive success after which an half-open circuit will be fully closed.
   # (circuit breaker required)
@@ -170,6 +181,8 @@ module Semian
   #
   # Returns the registered resource.
   def register(name, **options)
+    return UnprotectedResource.new(name) if ENV.key?("SEMIAN_DISABLED")
+
     circuit_breaker = create_circuit_breaker(name, **options)
     bulkhead = create_bulkhead(name, **options)
 
@@ -264,8 +277,8 @@ module Semian
   private
 
   def create_circuit_breaker(name, **options)
-    circuit_breaker = options.fetch(:circuit_breaker, true)
-    return unless circuit_breaker
+    return if ENV.key?("SEMIAN_CIRCUIT_BREAKER_DISABLED")
+    return unless options.fetch(:circuit_breaker, true)
 
     require_keys!([:success_threshold, :error_threshold, :error_timeout], options)
 
@@ -304,16 +317,18 @@ module Semian
   end
 
   def create_bulkhead(name, **options)
-    bulkhead = options.fetch(:bulkhead, true)
-    return unless bulkhead
+    return if ENV.key?("SEMIAN_BULKHEAD_DISABLED")
+    return unless options.fetch(:bulkhead, true)
 
     permissions = options[:permissions] || default_permissions
     timeout = options[:timeout] || 0
-    ::Semian::Resource.new(name,
+    ::Semian::Resource.new(
+      name,
       tickets: options[:tickets],
       quota: options[:quota],
       permissions: permissions,
-      timeout: timeout)
+      timeout: timeout,
+    )
   end
 
   def require_keys!(required, options)

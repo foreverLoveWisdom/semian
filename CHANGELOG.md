@@ -1,5 +1,49 @@
 # Unreleased
 
+# v0.20.1
+
+* More efficient activerecord_trilogy_adapter and mysql2_adapter regex. (#508, #510)
+
+# v0.20.0
+
+* Ensure Active Record Trilogy adapter handles AdapterTimeout and ConnectionFailed exceptions. (#497)
+* Allow passing --with-openssl-dir for a custom OpenSSL installation. (#499)
+* Use ActiveRecord::ConnectionNotEstablished as base error for TrilogyAdapter. (#496)
+* Fix Mysql2 connection error regular expressions. (#506)
+
+# v0.19.1
+
+* Active Record Trilogy adapter needs to patch `#raw_execute` instead of `#execute` for queries. (#494)
+
+# v0.19.0
+
+* Redis Readonly errors won't trigger semian open circuit. (#489)
+* New `dynamic` options, allowing a per-request resource configuration with the HTTP adapter. (#485)
+
+# v0.18.1
+
+* Remove dependency on activerecord-trilogy-adapter in Trilogy adapter for Semian. (#486)
+* Fix: Change in method signature for Trilogy adapter's `#execute_method`. (#491)
+
+# v0.18.0
+
+* Support Active Record Trilogy adapter. (#468)
+
+# v0.17.0
+
+* Avoid prepending the same prefix twice to errors messages. (#423)
+  This mostly happens with the `redis-rb 5+` gem as it translate `redis-client` errors.
+* Fix running tests in DEBUG mode to test missing semaphores resources. (#430)
+* `Semian.register` returns `UnprotectedResource` when environment
+  variable `SEMIAN_DISABLED` is set. (#427)
+  Introduces environment variables `SEMIAN_CIRCUIT_BREAKER_DISABLED` to disable only
+  `circuit_breaker` and `SEMIAN_BULKHEAD_DISABLED` only `bulkhead`.
+* Refactor: Replace `Time.now` with `CLOCK_MONOTONIC` in Resource `updated_at` field. (#443)
+  Replace `Timecop.travel` for tests with custom mock solution to support monotonic clocks.
+* Refactor: Replace `Time.now` with `CLOCK_MONOTONIC` in `CircuitBreaker`. (#441)
+* Support Ruby 3.2.0. (#463)
+* Enable write barrier protection on Resource. (#469)
+
 # v0.16.0
 
 * Typo in error message for missing option `:tickets`. (#412)
